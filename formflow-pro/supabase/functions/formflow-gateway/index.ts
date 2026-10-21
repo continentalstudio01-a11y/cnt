@@ -10,7 +10,7 @@ if(secret.length!==64)return json({error:'Unauthorized'},401);
 const conf=await db.from('formflow_gateway_config').select('hash').eq('id','gateway').single();
 if(conf.error||await sha(secret)!==conf.data.hash)return json({error:'Unauthorized'},401);
 if(Number(req.headers.get('content-length')||0)>12000000)return json({error:'Request too large'},413);
-const b=await req.json();
+const b=await req.json() as any;
 if(b.op==='db'){const {data,error}=await db.rpc('formflow_query_batch',{statements:b.statements});if(error)throw error;return json({data})}
 if(b.op==='invite'){
 if(typeof b.email!=='string'||!/^\S+@\S+\.\S+$/.test(b.email))return json({error:'Invalid email'},400);
