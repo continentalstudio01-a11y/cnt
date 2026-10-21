@@ -6,6 +6,7 @@ import {workspaceDefaults,workspaceName,type WorkspaceSettings,type DefaultsGrou
 import type {Form} from './model';
 import MediaUpload from './media-upload';
 import Team from './team';
+import {ThemePreference} from './theme';
 import Deliveries from './deliveries';import McpPanel from './mcp-panel';
 
 type Props={settings:WorkspaceSettings;canEdit:boolean;secrets:Record<string,boolean>;forms:Form[];rows:any[];onSaved:(s:WorkspaceSettings,secrets:Record<string,boolean>)=>void;reload:()=>void;notify:(s:string)=>void;onDirty:(v:boolean)=>void};
@@ -37,6 +38,7 @@ export default function WorkspaceSettingsPanel({settings,canEdit,secrets,forms,r
     {error&&<div className="error" role="alert" ref={errorRef} tabIndex={-1}>{error}</div>}{success&&<div className="config-success" role="status"><Check size={17}/>{success}</div>}
     <div className="config-tabs" role="tablist" aria-label="Seções de configurações" onKeyDown={e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=sections.findIndex(s=>s[0]===tab),next=e.key==='Home'?0:e.key==='End'?sections.length-1:(i+(e.key==='ArrowRight'?1:-1)+sections.length)%sections.length;T(sections[next][0]);requestAnimationFrame(()=>document.getElementById(sectionId(sections[next][0])+'-tab')?.focus())}}>{sections.map(([name,Icon])=><button key={name} role="tab" id={sectionId(name)+'-tab'} aria-controls={sectionId(name)+'-panel'} tabIndex={tab===name?0:-1} aria-selected={tab===name} className={tab===name?'active':''} onClick={()=>T(name)}><Icon size={16}/>{name}</button>)}</div>
     <section role="tabpanel" id={sectionId(tab)+'-panel'} aria-labelledby={sectionId(tab)+'-tab'}>
+    {tab==='Aparência'&&<ThemePreference/>}
     {tab==='Equipe e dados'?<Team rows={rows} reload={reload} notify={notify} agencyName={settings.agencyName} timezone={settings.timezone}/>:tab==='IA e MCP'?<McpPanel mode={draft.mcpMode} savedMode={settings.mcpMode} onModeChange={value=>set('mcpMode',value)} canConfigure={canEdit} notify={notify} timezone={settings.timezone}/>:<fieldset disabled={!canEdit||saving} className="config-fieldset">
     {tab==='Identidade'?<>
       <Card title="Uma identidade para chamar de sua." description="Edite o nome que aparece na navegação, na aba do navegador e na tela de entrada.">
@@ -47,7 +49,7 @@ export default function WorkspaceSettingsPanel({settings,canEdit,secrets,forms,r
       </Card>
       <div className="panel config-brand-preview" style={previewStyle}><span className="eyebrow">PRÉVIA DA IDENTIDADE</span><div>{draft.systemLogo?<img src={draft.systemLogo} alt="Logo do sistema"/>:<span className="brand-icon" style={{background:draft.primaryColor}}>ϟ</span>}<strong>{workspaceName(draft)}</strong></div><p>{draft.agencyName} · {draft.workspaceDescription}</p></div>
     </>:tab==='Aparência'?<>
-      <Card title="Cores do sistema" description="Personalize o painel administrativo. Os formulários têm padrões visuais próprios na seção Formulários.">
+      <Card title="Cores do sistema" description="As cores de fundo abaixo definem o modo claro. Sua marca e a cor principal também aparecem no modo escuro.">
         {color('primaryColor','Cor principal')}{color('accentColor','Cor de destaque')}{color('background','Fundo do painel')}{color('surfaceColor','Fundo dos cartões')}{color('textColor','Texto principal')}{color('sidebarColor','Fundo da barra lateral')}
       </Card><Card title="Tipografia e interface">{font('font','Fonte dos textos')}{font('headingFont','Fonte dos títulos')}{field('radius','Arredondamento (px)',{type:'number',min:0,max:24})}{toggle('compact','Interface compacta','Reduz o espaçamento do painel.')} </Card>
       <div className="panel config-brand-preview" style={previewStyle}><h2 style={{fontFamily:draft.headingFont}}>Seu próximo lead começa aqui.</h2><p>Uma prévia das cores e fontes escolhidas.</p><button style={{background:draft.primaryColor,color:'#fff',borderRadius:draft.radius}}>Botão principal</button><span className="config-accent" style={{background:draft.accentColor}}>Destaque</span></div>

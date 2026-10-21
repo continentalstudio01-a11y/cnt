@@ -12,3 +12,72 @@
 .app .settings.active{background:color-mix(in srgb,var(--ui-primary,#2563eb) 9%,white);color:var(--ui-primary,#2563eb)}
 
 .mcp-hero{display:flex;align-items:flex-start;gap:20px;background:linear-gradient(115deg,#edf4ff,#fafcff)!important}.mcp-hero>div:nth-child(2){flex:1;min-width:0}.mcp-hero h2{margin-top:10px}.mcp-hero p{max-width:670px;margin-bottom:0}.mcp-hero-icon{padding:16px;color:var(--ui-primary,#2563eb);background:white;border:1px solid #dfe9fc;border-radius:12px}.mcp-panel .config-card{margin-top:20px}.mcp-scope{display:flex;align-items:flex-start;gap:14px;padding:20px;background:#f8faff;border:1px solid #e6ecf5;border-radius:8px;line-height:1.7;font-size:12px;margin:14px 0}.mcp-scope svg{flex-shrink:0;color:#7394c9}.mcp-scope small{margin-top:8px;line-height:1.7}.mcp-permissions{display:flex;flex-wrap:wrap;gap:12px 22px;margin:20px 0 5px}.mcp-permissions span{display:inline-flex;align-items:center;gap:7px;color:#65809f;font-size:11px}.mcp-permissions svg{color:#4aa27d}.mcp-connect-steps{padding-left:24px;line-height:1.8;color:#667b98;margin:20px 0}.mcp-connect-steps li{padding:5px 0}.mcp-endpoint{display:flex;align-items:center;gap:12px}.mcp-endpoint label{flex:1;min-width:0}.mcp-endpoint input{font-family:monospace;font-size:11px}.mcp-endpoint button{margin-top:18px}.mcp-examples{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:20px}.mcp-examples button{padding:18px;align-items:flex-start;justify-content:space-between;line-height:1.7;text-align:left;font-size:12px;background:#fbfcff}.mcp-examples svg{flex-shrink:0;color:#8ba3c3}.mcp-tool-group summary{display:flex;justify-content:space-between;align-items:center;font-weight:650;color:#4f668b}.mcp-tool-group summary>span{font-size:10px;background:#eef3fb;padding:4px 8px;border-radius:4px}.mcp-tool-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:20px 0 10px}.mcp-tool-grid article{border:1px solid #e2e9f3;border-radius:8px;padding:18px;background:#fcfdff;min-width:0}.mcp-tool-grid article>div{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.mcp-tool-grid strong{font-size:12px}.mcp-tool-grid .badge{font-size:9px;white-space:nowrap}.mcp-tool-grid p{font-size:11px;line-height:1.8;margin:12px 0}.mcp-tool-grid code{font-size:10px;color:#8d9fb9;overflow-wrap:anywhere}.mcp-tool-grid .muted{opacity:.55}@media(max-width:960px){.mcp-examples{grid-template-columns:1fr}.mcp-tool-grid{grid-template-columns:1fr}}@media(max-width:700px){.mcp-hero{flex-wrap:wrap;gap:14px}.mcp-hero-icon{padding:12px}.mcp-hero .badge{margin-left:0}.mcp-endpoint{display:block}.mcp-endpoint button{margin:0}.mcp-permissions{gap:12px 16px}.mcp-tool-grid article>div{flex-wrap:wrap}}
+
+/* Personal UI theme. Published forms retain their independently configured design. */
+:root{--page-background:#f7f8fa;--page-surface:#fff;--page-text:#20252e;--page-muted:#667085;--page-border:#e3e8f0;--page-error:#b42318}
+html[data-ui-theme="dark"]{--page-background:#0e1520;--page-surface:#17212f;--page-text:#e7edf7;--page-muted:#a2b1c6;--page-border:#2c3b50;--page-error:#ff9b91}
+body{background:var(--page-background);color:var(--page-text)}
+.app{--ui-background:var(--ui-light-background,#f7f8fa);--ui-surface:var(--ui-light-surface,#fff);--ui-text:var(--ui-light-text,#20252e);--ui-sidebar:var(--ui-light-sidebar,#fff);--ui-border:#e1e7ef;--ui-muted:#7d8491;--ui-soft:#f3f6fb;--ui-hover:#f8faff;--ui-link:var(--ui-primary,#2563eb);color-scheme:light}
+html[data-ui-theme="dark"] .app{--ui-background:#0e1520;--ui-surface:#17212f;--ui-sidebar:#121c29;--ui-text:#e7edf7;--ui-muted:#a2b1c6;--ui-border:#2c3b50;--ui-soft:#1e2b3d;--ui-hover:#24334a;--ui-link:color-mix(in srgb,var(--ui-primary,#2563eb) 60%,white);color-scheme:dark}
+.theme-toggle{width:40px;height:40px;padding:0!important;flex-shrink:0;border-radius:9px!important}
+.theme-toggle:disabled{cursor:default}
+.theme-toggle:hover{color:var(--ui-link,#2563eb)}
+.theme-picker{border:0;padding:0;margin:0;min-width:0}
+.theme-options{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.theme-option{display:flex;align-items:center;gap:12px;border:1px solid var(--ui-border,#e1e7ef);border-radius:10px;padding:18px;margin:0;cursor:pointer;position:relative;color:var(--ui-text,#20252e);min-height:88px}
+.theme-option input{width:16px;height:16px;margin:0;flex-shrink:0;accent-color:var(--ui-primary,#2563eb)}
+.theme-option>svg{flex-shrink:0;color:var(--ui-muted,#7d8491)}
+.theme-option strong{display:block;font-size:13px}
+.theme-option small{margin-top:5px;color:var(--ui-muted,#7d8491);font-weight:400;line-height:1.5}
+.theme-option.selected{border-color:var(--ui-primary,#2563eb);background:color-mix(in srgb,var(--ui-primary,#2563eb) 8%,var(--ui-surface,#fff));box-shadow:0 0 0 1px var(--ui-primary,#2563eb)}
+.theme-option:focus-within{outline:3px solid #a5bfff;outline-offset:3px}
+.workspace-protection{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.login-page{position:relative;color:var(--page-text);color-scheme:light}
+.login-theme{position:absolute;top:24px;right:24px}
+.login-theme .theme-toggle{background:var(--page-surface);border-color:var(--page-border);color:var(--page-text)}
+.login-card label{color:var(--page-text)}
+.login-card input{background:var(--page-surface);color:var(--page-text)}
+.login-card small,.auth-gate p{color:var(--page-muted)}
+html[data-ui-theme="dark"] :is(.login-page,.auth-gate){color-scheme:dark}
+html[data-ui-theme="dark"] .app :is(.topbar,.panel,.metric,.form-card,.properties,.block-panel,.modal,.integration-card,.editor-header,.editor-tabs,.filterbar,.config-savebar,table,.period,.integration-grid>button,.mcp-hero-icon,.art-card,.floating-tag,.conversion-pill){background:var(--ui-surface);border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app :is(.sidebar,.app-footer,.profile,.card-body>div,.editor-tabs,.property-actions,.steps-heading,.version,.chart-bars,.stat-row,details,.config-image-field,.config-secret,.config-form-list,th,td){border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app :where(button,input,select,textarea):not(.primary,.runner *,.form-canvas *,.config-brand-preview *){background:var(--ui-surface);border-color:var(--ui-border);color:var(--ui-text)}
+html[data-ui-theme="dark"] .app :where(button):not(.primary,.runner *,.form-canvas *,.config-brand-preview *):hover{background:var(--ui-hover);border-color:#496185}
+html[data-ui-theme="dark"] .app :is(input,textarea)::placeholder{color:#8091a8}
+html[data-ui-theme="dark"] .app :where(p,small,label,summary):not(.runner *,.form-canvas *,.cover-mini *,.config-brand-preview *){color:var(--ui-muted)}
+html[data-ui-theme="dark"] .app :is(.metric>div,.metric small,.card-body p,.card-body>div,.topbar .crumb,.topbar>div:last-child,.nav-label,.eyebrow,.app-footer,.filterbar,.backlink,.steps button,.block-panel h3>span,.canvas-toolbar,.drop-hint,.report-context,.stat-row>span,.stat-row b,.mcp-connect-steps,.mcp-permissions span,.mcp-tool-grid code,.art-tiny){color:var(--ui-muted)}
+html[data-ui-theme="dark"] .app :is(.logo,.profile,.settings,nav button,.topbar button,.text-button,.modal-close,.backlink,.config-tabs button,.editor-tabs>button){background:transparent}
+html[data-ui-theme="dark"] .app :is(nav button.active,.settings.active,.config-tabs button.active,.steps button.selected,.canvas-toolbar button.selected){background:color-mix(in srgb,var(--ui-primary,#2563eb) 18%,var(--ui-surface));color:var(--ui-link);border-color:color-mix(in srgb,var(--ui-primary,#2563eb) 55%,var(--ui-border))}
+html[data-ui-theme="dark"] .app :is(.text-button,.pro,.editor-tabs .chosen,.card-body button,.help-box button,.new-card>b,.welcome-banner>div>button,.mcp-tool-group summary){color:var(--ui-link)}
+html[data-ui-theme="dark"] .app :is(.badge,.section-title h2>span,nav em,.steps button>span,.mcp-tool-group summary>span,.mcp-scope,.mcp-examples button,.mcp-tool-grid article,.rule-card,.tip,.notice,.logic-map article,.new-card,.new-card>span,.stat-row>div){background:var(--ui-soft);border-color:var(--ui-border);color:var(--ui-muted)}
+html[data-ui-theme="dark"] .app .help-box{background:linear-gradient(135deg,#1b2a42,#17212f);border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app .welcome-banner{background:linear-gradient(115deg,#1b2c49,#152338);border-color:#30486e}
+html[data-ui-theme="dark"] .app :is(.welcome-banner h2,.art-card h3){color:#e1ebff}
+html[data-ui-theme="dark"] .app .banner-tag{color:#a8c5fc}
+html[data-ui-theme="dark"] .app .orbit{border-color:#30486e}
+html[data-ui-theme="dark"] .app .art-card>div{background:#1c2e4b;border-color:#36507a;color:#b3cbf3}
+html[data-ui-theme="dark"] .app .art-card>div>span{border-color:#496185}
+html[data-ui-theme="dark"] .app .template-teaser{background:linear-gradient(120deg,#17212f,#1a2840)}
+html[data-ui-theme="dark"] .app .form-cover{background:linear-gradient(120deg,color-mix(in srgb,var(--form-color,#2563eb) 18%,#17212f),#1b293d)}
+html[data-ui-theme="dark"] .app .cover-mini{color:#243551}
+html[data-ui-theme="dark"] .app .status{background:#101c2be6;color:#b3c2d7}
+html[data-ui-theme="dark"] .app :is(.status.published,.lead-status.Quente){color:#86e1b5;background:#183d32}
+html[data-ui-theme="dark"] .app .lead-status.Morno{color:#ffd49a;background:#453521}
+html[data-ui-theme="dark"] .app .lead-status.Frio{color:#a9cbff;background:#213754}
+html[data-ui-theme="dark"] .app .canvas{background-color:#101a28;background-image:radial-gradient(#354660 .7px,transparent .7px)}
+html[data-ui-theme="dark"] .app .canvas-toolbar>div{background:var(--ui-surface);border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app :is(.logic-map,.branch-map){background:#111c2b;border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app .mcp-hero{background:linear-gradient(115deg,#1b2c49,#17212f)!important}
+html[data-ui-theme="dark"] .app .config-image-preview{background:repeating-conic-gradient(#1a2637 0 25%,#243246 0 50%) 0/16px 16px;border-color:var(--ui-border)}
+html[data-ui-theme="dark"] .app .config-success{background:#17392e;border-color:#2c6650;color:#9ce1bb}
+html[data-ui-theme="dark"] .app :is(.danger,.error){color:#ffaaa2}
+html[data-ui-theme="dark"] .app .toast{background:#22334a;border-color:#3c5475;color:#e7edf7}
+html[data-ui-theme="dark"] .app .modal-backdrop{background:#030910b8}
+html[data-ui-theme="dark"] .app .avatar{background:#273b59;color:#c1d7fb}
+html[data-ui-theme="dark"] .app .avatar.orange{background:#432c21;color:#ffbc85}
+html[data-ui-theme="dark"] .app .pro{border-color:#3a5680}
+html[data-ui-theme="dark"] .app .primary{color:#fff}
+html[data-ui-theme="dark"] .app :is(.form-canvas,.runner){color-scheme:light}
+@media(max-width:700px){.theme-options{grid-template-columns:1fr}.theme-option{padding:15px;min-height:74px}.topbar>div:last-child{gap:4px}.topbar .theme-toggle{margin-left:0;width:36px;height:36px}.workspace-protection{display:none}.topbar>div:first-child{min-width:0}.topbar strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:36vw}.login-theme{top:14px;right:14px}}
+@media print{.theme-toggle,.theme-preference{display:none!important}html[data-ui-theme="dark"] .app{--ui-background:#fff;--ui-surface:#fff;--ui-text:#20252e;--ui-muted:#515967;--ui-border:#ddd;color-scheme:light}body{background:#fff;color:#20252e}}
