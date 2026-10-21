@@ -1,0 +1,1 @@
+import {getDb} from '../../../db';import {sql} from 'drizzle-orm';export async function GET(){try{await getDb().all(sql`select 1 as ok`);return Response.json({ok:true,service:'FormFlow Pro',database:'connected'},{headers:{'Cache-Control':'no-store'}})}catch{return Response.json({ok:false,database:'unavailable'},{status:503})}}

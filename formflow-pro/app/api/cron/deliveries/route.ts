@@ -1,0 +1,1 @@
+import {processJobs} from '../../../../lib/outbox';import {env} from '../../../../lib/platform';export async function GET(req:Request){if(!(env as any).CRON_SECRET||req.headers.get('authorization')!=='Bearer '+(env as any).CRON_SECRET)return new Response('Unauthorized',{status:401});await processJobs();return Response.json({ok:true})}

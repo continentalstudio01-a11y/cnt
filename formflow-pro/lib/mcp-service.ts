@@ -1,0 +1,102 @@
+import {funnelReport} from './funnel-report';
+import {env} from './platform';
+import {getDb} from '../db';
+import {records,members,sessions,jobs} from '../db/schema';
+import {and,eq,desc,gte,lte,count} from 'drizzle-orm';
+import {access} from './access';
+import {readWorkspace} from './workspace';
+import {decrypt,encrypt} from './privacy';
+import {walk} from './flow';
+import {template,type Form} from '../app/model';
+import {newFormDefaults} from '../app/workspace-model';
+import {editableSchemas,type mcpTools} from './mcp-catalog';
+import {POST as manage} from '../app/api/manage/route';
+import {GET as settingsGet,POST as settingsSave} from '../app/api/settings/route';
+import {GET as integrationsGet,POST as integrationsPost} from '../app/api/integrations/route';
+import {POST as mediaUpload} from '../app/api/media/route';
+import {GET as backupGet,POST as backupRestore} from '../app/api/backup/route';
+import {POST as maintenance} from '../app/api/maintenance/route';
+
+export type Actor=NonNullable<Awaited<ReturnType<typeof access>>>;
+type Definition=typeof mcpTools[number];
+export class ToolError extends Error{constructor(message:string,public code='operation_failed'){super(message)}}
+async function decodedResponse(response:Response){const text=await response.text();let value:any;try{value=JSON.parse(text)}catch{value={message:text}}if(!response.ok)throw new ToolError(value.error||value.message||'Não foi possível executar a operação.',response.status===409?'revision_conflict':response.status>=500?'operation_uncertain':'http_'+response.status);return value}
+function internalRequest(req:Request,path:string,body:unknown){const url=new URL(path,new URL(req.url).origin);return new Request(url,{method:'POST',headers:{'Content-Type':'application/json',Origin:url.origin},body:JSON.stringify(body)})}
+async function record(a:Actor,id:string,kind:string){const row=await getDb().select().from(records).where(and(eq(records.id,id),eq(records.owner,a.owner),eq(records.kind,kind))).limit(1);if(!row.length)throw new ToolError('Registro não encontrado neste workspace.','not_found');return {...row[0],data:JSON.parse(await decrypt(row[0].data))}}
+async function form(a:Actor,id:string){const row=await record(a,id,'form');if(id===(env as any).DEFAULT_META_FORM_ID&&!Object.hasOwn(row.data,'pixel'))row.data.pixel=(env as any).DEFAULT_META_PIXEL_ID||'';return row.data as Form}
+function checkRevision(current:{revision?:number},expected:number){if((current.revision||0)!==expected)throw new ToolError('Outra edição foi salva. Consulte a revisão atual antes de alterar.','revision_conflict')}
+async function saveForm(req:Request,value:Form,action='save'){return decodedResponse(await manage(internalRequest(req,'/api/manage',{id:value.id,kind:'form',action,data:value})))}
+function dates(p:any){if(p.since&&p.until&&p.since>p.until)throw new ToolError('A data inicial deve vir antes da data final.','invalid_period')}
+function leadWhere(a:Actor,p:any){return and(eq(records.owner,a.owner),eq(records.kind,'lead'),p.form_id?eq(records.parent,p.form_id):undefined,p.since?gte(records.created,p.since):undefined,p.until?lte(records.created,p.until):undefined)}
+function matchesLead(lead:any,p:any){return (!p.status||lead.data.status===p.status)&&(!p.query||JSON.stringify(lead.data).toLocaleLowerCase('pt-BR').includes(p.query.toLocaleLowerCase('pt-BR')))}
+async function leadPage(a:Actor,p:any,offset:number,limit:number){const rows=await getDb().select().from(records).where(leadWhere(a,p)).orderBy(desc(records.created),desc(records.id)).offset(offset).limit(limit);return Promise.all(rows.map(async row=>({...row,data:JSON.parse(await decrypt(row.data))})))}
+async function artifact(a:Actor,name:string,text:string,adminOnly=false,purpose='export',leadIds:string[]=[]){
+  const bytes=new TextEncoder().encode(text);if(bytes.length>10000000)throw new ToolError('O arquivo excede 10 MB. Reduza o período ou a seleção.','file_too_large');
+  let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));
+  const id=crypto.randomUUID(),expiresAt=new Date(Date.now()+86400000).toISOString();
+  await env.BUCKET!.put(id,await encrypt(btoa(raw)),{httpMetadata:{contentType:'application/octet-stream'}});
+  await getDb().insert(records).values({id,owner:a.owner,kind:'file',parent:'',created:new Date().toISOString(),data:JSON.stringify({name,adminOnly,purpose,expiresAt,leadIds})});
+  return {id,download_path:'/api/file?id='+id,filename:name,expires_at:expiresAt,requires_sign_in:true};
+}
+async function analytics(a:Actor,p:any){
+  dates(p);const db=getDb(),where=leadWhere(a,p),sessionWhere=and(eq(sessions.owner,a.owner),p.form_id?eq(sessions.form,p.form_id):undefined,p.since?gte(sessions.created,p.since):undefined,p.until?lte(sessions.created,p.until):undefined);
+  const [leadRows,sessionRows,totals,sessionTotals,eventRows,formRows,ws]=await Promise.all([
+    leadPage(a,p,0,5001),db.select().from(sessions).where(sessionWhere).orderBy(desc(sessions.created)).limit(5001),db.select({n:count()}).from(records).where(where),db.select({n:count()}).from(sessions).where(sessionWhere),
+    db.select().from(records).where(and(eq(records.owner,a.owner),eq(records.kind,'event'),p.form_id?eq(records.parent,p.form_id):undefined,p.since?gte(records.created,p.since):undefined,p.until?lte(records.created,p.until):undefined)).limit(5001),
+    db.select().from(records).where(and(eq(records.owner,a.owner),eq(records.kind,'form'),p.form_id?eq(records.id,p.form_id):undefined)).limit(500),readWorkspace(a.owner),
+  ]);
+  const leads=leadRows.slice(0,5000),flows=sessionRows.slice(0,5000),sources:Record<string,number>={},devices:Record<string,number>={},locations:Record<string,number>={},daily:Record<string,number>={};
+  const add=(target:Record<string,number>,key:string)=>target[key]=(target[key]||0)+1;
+  for(const lead of leads){const d=lead.data;add(sources,d.source?.utm_source||'Direto');add(devices,d.device||'Não informado');const location=Object.keys(d.fieldTypes||{}).find(k=>d.fieldTypes[k]==='Cidade e estado');add(locations,location?d.answers[location]||'Não informado':'Não informado');add(daily,new Intl.DateTimeFormat('en-CA',{timeZone:ws.timezone}).format(new Date(lead.created)))}
+  const started=flows.filter(s=>s.state!=='viewed').length,completed=flows.filter(s=>['completed','disqualified'].includes(s.state)).length;
+  return {period:{since:p.since||null,until:p.until||null,timezone:ws.timezone},total_responses:totals[0].n,total_sessions:sessionTotals[0].n,sample:{leads:leads.length,sessions:flows.length,limited:leadRows.length>5000||sessionRows.length>5000||eventRows.length>5000},started,completed,completion_rate:started?Math.round(completed/started*10000)/100:0,qualified:leads.filter(l=>l.data.qualified).length,hot:leads.filter(l=>l.data.status==='Quente').length,whatsapp_clicks:eventRows.filter(r=>JSON.parse(r.data).event==='whatsapp').length,sources,devices,locations,daily,funnel:formRows.map(row=>{const draft=JSON.parse(row.data),f=draft.live||draft;return {form_id:row.id,name:f.name,steps:f.blocks.map((b:any)=>({id:b.id,title:b.title,reached:flows.filter(s=>s.form===row.id&&JSON.parse(s.path).includes(b.id)).length,abandoned:flows.filter(s=>s.form===row.id&&s.state==='active'&&Date.now()-Date.parse(s.updated)>1800000&&JSON.parse(s.path).at(-1)===b.id).length}))}})};
+}
+
+export async function executeTool(t:Definition,p:any,a:Actor,req:Request):Promise<any>{
+  const db=getDb(),name=t.name.replace('formflow_','');
+  switch(name){
+    case 'workspace_get':return {...await decodedResponse(await settingsGet()),account:{email:a.user.email,role:a.role,is_owner:a.owner===a.user.userId},scope:'workspace atual'};
+    case 'workspace_update':case 'credentials_update':{const settings=await readWorkspace(a.owner);checkRevision(settings,p.expected_revision);return decodedResponse(await settingsSave(internalRequest(req,'/api/settings',{settings:name==='workspace_update'?{...settings,...p.patch,revision:settings.revision}:settings,secrets:name==='credentials_update'?p.changes:{}})))}
+    case 'schema_get':{const schemas=editableSchemas();return p.entity==='all'?schemas:p.entity==='form'?{form:schemas.form,block_types:schemas.block_types,templates:schemas.templates,managed_fields:schemas.managed_fields}:{workspace:schemas.workspace}}
+    case 'forms_list':{const rows=await db.select().from(records).where(and(eq(records.owner,a.owner),eq(records.kind,'form'))).orderBy(desc(records.created)).limit(500);const list=rows.map(r=>JSON.parse(r.data)).filter(f=>(!p.query||f.name.toLocaleLowerCase('pt-BR').includes(p.query.toLocaleLowerCase('pt-BR')))&&(!p.lifecycle||(f.lifecycle||'active')===p.lifecycle));return {forms:list.slice(p.offset,p.offset+p.limit).map(f=>({id:f.id,name:f.name,description:f.description,revision:f.revision||0,lifecycle:f.lifecycle||'active',published:!!f.published,steps:f.blocks.length,url:new URL('/f/'+encodeURIComponent(f.id),req.url).href})),total:list.length,next_offset:p.offset+p.limit<list.length?p.offset+p.limit:null,limit_reached:rows.length===500}}
+    case 'form_get':return {form:await form(a,p.id),public_url:new URL('/f/'+encodeURIComponent(p.id),req.url).href};
+    case 'form_create':{const ws=await readWorkspace(a.owner),f=newFormDefaults(template(p.template),ws,p.template!=='Agência de marketing');return saveForm(req,{...f,...p.patch,id:f.id,name:p.name,published:false,revision:0,live:undefined})}
+    case 'form_update':{const f=await form(a,p.id);checkRevision(f,p.expected_revision);return saveForm(req,{...f,...p.patch,id:f.id,revision:p.expected_revision})}
+    case 'form_action':{const f=await form(a,p.id);checkRevision(f,p.expected_revision);if(p.action==='duplicate')return saveForm(req,{...structuredClone(f),id:crypto.randomUUID(),name:p.name||f.name+' (cópia)',revision:0,published:false,live:undefined,lifecycle:'active'});const lifecycle=p.action==='pause'?'paused':p.action==='activate'?'active':p.action==='archive'?'archived':f.lifecycle;return saveForm(req,{...f,lifecycle},['publish','unpublish'].includes(p.action)?p.action:p.action==='archive'?'unpublish':'save')}
+    case 'form_versions_list':{await form(a,p.id);const rows=await db.select().from(records).where(and(eq(records.owner,a.owner),eq(records.kind,'version'),eq(records.parent,p.id))).orderBy(desc(records.created)).offset(p.offset).limit(p.limit);return {versions:rows.map(r=>({id:r.id,created:r.created,name:JSON.parse(r.data).name,revision:JSON.parse(r.data).revision})),next_offset:rows.length===p.limit?p.offset+p.limit:null}}
+    case 'form_version_restore':{const f=await form(a,p.id);checkRevision(f,p.expected_revision);const version=await record(a,p.version_id,'version');if(version.parent!==f.id)throw new ToolError('A versão pertence a outro formulário.','wrong_parent');return saveForm(req,{...version.data,id:f.id,revision:p.expected_revision,published:f.published,live:f.live})}
+    case 'forms_apply_defaults':return decodedResponse(await settingsSave(internalRequest(req,'/api/settings',{action:'applyDefaults',revision:p.expected_revision,formIds:p.form_ids,groups:p.groups})));
+    case 'form_test':{const f=await form(a,p.id);if(p.version==='published'&&!f.published)throw new ToolError('Este formulário não está publicado.','not_published');const selected=p.version==='published'?f.live||f:f,r=walk(selected,p.answers);return {...r,current_block:selected.blocks[r.current]?.id||null,path_labels:r.path.map(id=>({id,title:selected.blocks.find(b=>b.id===id)?.title})),classification:r.cold?'Frio':r.score>=(selected.hot??60)?'Quente':r.score>=(selected.warm??25)?'Morno':'Frio',test_mode:true}}
+    case 'leads_list':{dates(p);const rows=await leadPage(a,p,p.offset,p.limit);return {leads:rows.filter(l=>matchesLead(l,p)),examined:rows.length,next_offset:rows.length===p.limit?p.offset+p.limit:null}}
+    case 'lead_get':return record(a,p.id,'lead');
+    case 'lead_update':{const row=await record(a,p.id,'lead');if(p.patch.stage){const ws=await readWorkspace(a.owner);if(![...ws.pipelineStages,row.data.stage].includes(p.patch.stage))throw new ToolError('A etapa não existe. Consulte as configurações do workspace.','invalid_stage')}await decodedResponse(await manage(internalRequest(req,'/api/manage',{id:p.id,kind:'leadUpdate',data:{...row.data,...p.patch}})));return record(a,p.id,'lead')}
+    case 'lead_delete':{await record(a,p.id,'lead');return decodedResponse(await manage(internalRequest(req,'/api/manage',{id:p.id,delete:true})))}
+    case 'leads_export':{dates(p);const selected:any[]=[];let offset=0,more=false;while(offset<5000){const page=await leadPage(a,p,offset,Math.min(500,5000-offset));selected.push(...page.filter(l=>matchesLead(l,p)));offset+=page.length;if(page.length<500)break;if(offset===5000)more=(await leadPage(a,p,offset,1)).length>0}const ws=await readWorkspace(a.owner),keys=[...new Set(selected.flatMap(l=>Object.keys(l.data.answers||{})))],labels=Object.fromEntries(selected.flatMap(l=>Object.entries(l.data.labels||{})));const rows=[['ID','Data','Classificação','Pontuação','Prioridade','Etapa','Responsável','Tags','Origem','Campanha',...keys.map(k=>labels[k]||k)],...selected.map(l=>[l.id,l.created,l.data.status,l.data.score,l.data.priority,l.data.stage,l.data.assignedTo,(l.data.tags||[]).join(', '),l.data.source?.utm_source||'Direto',l.data.source?.utm_campaign||'',...keys.map(k=>l.data.answers?.[k]||'')])];const csv='\uFEFF'+rows.map(row=>row.map(v=>'"'+String(v??'').replace(/^[\s]*[=+@-]/,"'$&").replaceAll('"','""')+'"').join(ws.csvDelimiter)).join('\n');return {...await artifact(a,'leads-'+new Date().toISOString().slice(0,10)+'.csv',csv,false,'export',selected.map(l=>l.id)),exported:selected.length,examined:offset,limited:more,next_offset:more?offset:null}}
+    case 'analytics_get':return {...await analytics(a,p),detailed_funnel:await funnelReport(a.owner,p)};
+    case 'team_list':return {members:await db.select().from(members).where(eq(members.owner,a.owner)).limit(500),owner_account_is_protected:true};
+    case 'team_upsert':{if(p.email.toLowerCase()===(env as any).APP_OWNER_EMAIL?.toLowerCase()&&p.role!=='Administrador')throw new ToolError('O proprietário mantém o perfil de administrador.','owner_protected');return decodedResponse(await manage(internalRequest(req,'/api/manage',{id:'member:'+p.email.toLowerCase(),kind:'member',data:{email:p.email,role:p.role}})))}
+    case 'team_remove':{const row=await db.select().from(members).where(and(eq(members.owner,a.owner),eq(members.id,p.id))).limit(1);if(!row.length)throw new ToolError('Usuário não encontrado.','not_found');if(row[0].email===(env as any).APP_OWNER_EMAIL?.toLowerCase())throw new ToolError('O proprietário mantém o acesso.','owner_protected');return decodedResponse(await manage(internalRequest(req,'/api/manage',{id:p.id,delete:true})))}
+    case 'integrations_status':return {credentials:await decodedResponse(await integrationsGet()),deliveries:await db.select({id:jobs.id,provider:jobs.provider,state:jobs.state,attempts:jobs.attempts,status:jobs.status,error:jobs.error,created:jobs.created}).from(jobs).where(eq(jobs.owner,a.owner)).orderBy(desc(jobs.created)).limit(100)};
+    case 'delivery_retry':{const rows=await db.select().from(jobs).where(and(eq(jobs.id,p.id),eq(jobs.owner,a.owner))).limit(1);if(!rows.length)throw new ToolError('Entrega não encontrada.','not_found');return decodedResponse(await integrationsPost(internalRequest(req,'/api/integrations',{id:p.id})))}
+    case 'media_upload':{let raw:string;try{raw=atob(p.base64.replace(/^data:[^,]+,/,''))}catch{throw new ToolError('Base64 inválido.','invalid_file')}if(raw.length>2097152)throw new ToolError('A imagem deve ter até 2 MB.','file_too_large');const body=new FormData();body.append('file',new File([Uint8Array.from(raw,c=>c.charCodeAt(0))],p.filename,{type:p.mime}));const upload=new Request(new URL('/api/media',req.url),{method:'POST',headers:{Origin:new URL(req.url).origin},body});return decodedResponse(await mediaUpload(upload))}
+    case 'data_backup':{const response=await backupGet();if(!response.ok)return decodedResponse(response);return artifact(a,'formflow-backup-'+new Date().toISOString().slice(0,10)+'.json',await response.text(),true,'backup')}
+    case 'data_restore':{const file=await record(a,p.backup_id,'file');if(file.data.purpose!=='backup')throw new ToolError('Escolha um backup gerado por data_backup.','invalid_backup');if(file.data.expiresAt&&Date.parse(file.data.expiresAt)<Date.now())throw new ToolError('O arquivo expirou. Gere outro backup.','expired_file');const object=await env.BUCKET!.get(file.id);if(!object)throw new ToolError('Arquivo de backup não encontrado.','not_found');const raw=atob(await decrypt(await object.text())),body=new TextDecoder().decode(Uint8Array.from(raw,c=>c.charCodeAt(0)));return decodedResponse(await backupRestore(internalRequest(req,'/api/backup',JSON.parse(body))))}
+    case 'maintenance_run':return decodedResponse(await maintenance(internalRequest(req,'/api/maintenance',{})));
+    case 'audit_list':{const rows=await db.select().from(records).where(and(eq(records.owner,a.owner),eq(records.kind,'audit'))).orderBy(desc(records.created)).offset(p.offset).limit(p.limit);return {events:rows.map(r=>({...r,data:JSON.parse(r.data)})),next_offset:rows.length===p.limit?p.offset+p.limit:null}}
+    default:throw new ToolError('Ferramenta não encontrada.','unknown_tool');
+  }
+}
+
+async function sha(text:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text))),x=>x.toString(16).padStart(2,'0')).join('')}
+function canonical(value:any):string{if(Array.isArray(value))return '['+value.map(canonical).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(k=>JSON.stringify(k)+':'+canonical(value[k])).join(',')+'}';return JSON.stringify(value)}
+export async function runTool(t:Definition,p:any,a:Actor,req:Request){
+  if(!t.write)return executeTool(t,p,a,req);
+  const db=getDb(),key=await sha(a.owner+':'+a.user.userId+':'+p.request_id),id='mcp:'+key,hash=await sha(canonical({name:t.name,args:p})),created=new Date().toISOString();
+  const inserted=await db.insert(records).values({id,owner:a.owner,kind:'mcp_operation',parent:t.name==='formflow_lead_update'?String(p.id):t.name,created,data:await encrypt(JSON.stringify({state:'running',hash,tool:t.name,actor:a.user.userId}))}).onConflictDoNothing().returning({id:records.id});
+  if(!inserted.length){const previous=await record(a,id,'mcp_operation');if(previous.data.hash!==hash)throw new ToolError('request_id já foi usado para outro conteúdo. Use uma nova chave para uma nova alteração.','request_id_conflict');if(previous.data.state==='running')throw new ToolError('Esta operação está em andamento ou ficou sem confirmação. Consulte o recurso e o histórico antes de fazer uma nova tentativa.','operation_pending');if(previous.data.state==='failed')throw new ToolError(previous.data.message,previous.data.code);return {...previous.data.result,replayed:true}}
+  try{
+    const rawResult=await executeTool(t,p,a,req);const result=rawResult?.download_path?{...rawResult,download_url:new URL(rawResult.download_path,req.url).href}:rawResult;
+    await db.batch([db.update(records).set({data:await encrypt(JSON.stringify({state:'succeeded',hash,tool:t.name,actor:a.user.userId,result}))}).where(eq(records.id,id)),db.insert(records).values({id:crypto.randomUUID(),owner:a.owner,kind:'audit',parent:String(p.id||''),created:new Date().toISOString(),data:JSON.stringify({action:'MCP · '+t.title,user:a.user.email,tool:t.name,operation_id:id,state:'succeeded'})})]);
+    return {...result,operation_id:id};
+  }catch(error){const message=error instanceof ToolError?error.message:'Não foi possível confirmar a operação. Consulte o recurso e o histórico antes de tentar novamente.',code=error instanceof ToolError?error.code:'operation_uncertain';await db.batch([db.update(records).set({data:await encrypt(JSON.stringify({state:code==='operation_uncertain'?'running':'failed',hash,tool:t.name,actor:a.user.userId,message,code}))}).where(eq(records.id,id)),db.insert(records).values({id:crypto.randomUUID(),owner:a.owner,kind:'audit',parent:String(p.id||''),created:new Date().toISOString(),data:JSON.stringify({action:'MCP · '+t.title,user:a.user.email,tool:t.name,operation_id:id,state:code==='operation_uncertain'?'unconfirmed':'failed',code})})]);throw new ToolError(message,code)}
+}

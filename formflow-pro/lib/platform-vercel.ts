@@ -1,0 +1,1 @@
+import {createSupabaseAdapter} from './supabase-adapter';const bindings=createSupabaseAdapter(process.env);export const env=new Proxy({} as any,{get(_t,k:string){return k==='DB'?bindings.DB:k==='BUCKET'?bindings.BUCKET:process.env[k]}});

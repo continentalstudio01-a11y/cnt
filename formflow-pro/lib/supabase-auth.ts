@@ -1,0 +1,2 @@
+import {createServerClient} from '@supabase/ssr';import {cookies} from 'next/headers';import {env} from './platform';
+export async function authClient(){const jar=await cookies();return createServerClient((env as any).SUPABASE_URL,(env as any).SUPABASE_PUBLISHABLE_KEY,{cookies:{getAll:()=>jar.getAll(),setAll:(values)=>{try{values.forEach(({name,value,options})=>jar.set(name,value,{...options,httpOnly:true,sameSite:'lax',secure:process.env.NODE_ENV==='production'}))}catch{}}}})}

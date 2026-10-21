@@ -1,0 +1,2 @@
+import {env} from './platform';
+export async function gateway(body:unknown){const url=(env as any).SUPABASE_URL,key=(env as any).FORMFLOW_GATEWAY_KEY;if(!url||!key)throw Error('Supabase não configurado');const res=await fetch(url+'/functions/v1/formflow-gateway',{method:'POST',headers:{'Content-Type':'application/json','x-formflow-key':key},body:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(25000)});const value=await res.json() as any;if(!res.ok)throw Error(value.error||'Falha na conexão com o Supabase');return value}

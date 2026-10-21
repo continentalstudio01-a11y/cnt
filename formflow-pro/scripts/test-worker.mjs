@@ -1,0 +1,9 @@
+import fs from 'node:fs';import path from 'node:path';import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);const {Miniflare}=createRequire(require.resolve('wrangler/package.json'))('miniflare');
+const root=path.resolve('dist/server');const scan=d=>fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?scan(path.join(d,e.name)):[path.join(d,e.name)]);const main=path.join(root,'index.js');const scripts=scan(root).filter(f=>/\.(m?js)$/.test(f));const files=[main,...scripts.filter(f=>f!==main)];
+const mf=new Miniflare({modules:files.map(f=>({type:'ESModule',path:f,contents:fs.readFileSync(f,'utf8')})),compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'test-db'},r2Buckets:{BUCKET:'test-files'},bindings:{APP_OWNER_USER_ID:'test-owner',APP_OWNER_EMAIL:'owner@example.test',DATA_ENCRYPTION_KEY:Buffer.alloc(32,9).toString('base64'),WEBHOOK_SIGNING_SECRET:'formflow-tests-only'}});
+const realFetch=globalThis.fetch;
+try{const db=await mf.getD1Database('DB');for(const file of fs.readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort()){const sql=fs.readFileSync('drizzle/'+file,'utf8');for(const chunk of sql.split('--> statement-breakpoint'))if(chunk.trim())await db.prepare(chunk).run()}
+globalThis.fetch=async(input,init)=>{const request=new Request(input,init);if(new URL(request.url).hostname==='127.0.0.1'){return mf.dispatchFetch(request.url,{method:request.method,headers:Object.fromEntries(request.headers),body:['GET','HEAD'].includes(request.method)?undefined:await request.arrayBuffer()})}return realFetch(input,init)};
+await import(path.resolve(process.argv[2]||'tests/api.test.mjs'));
+}finally{globalThis.fetch=realFetch;await mf.dispose()}

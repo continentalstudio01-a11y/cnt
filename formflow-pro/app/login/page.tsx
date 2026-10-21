@@ -1,0 +1,1 @@
+import Login from './client';import {siteWorkspace} from '../../lib/workspace';export const dynamic='force-dynamic';export default async function Page(){const w=await siteWorkspace();return <Login systemName={w.systemName} systemLogo={w.systemLogo} primaryColor={w.primaryColor}/>;}

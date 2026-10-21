@@ -1,0 +1,14 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm run build:vercel",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "regions": [
+    "gru1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/deliveries",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

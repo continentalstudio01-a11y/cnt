@@ -1,0 +1,68 @@
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFileSync,readdirSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';
+import {pathToFileURL} from 'node:url';
+import path from 'node:path';
+import {initial} from '../app/model.ts';
+const require=createRequire(import.meta.url),wranglerRequire=createRequire(require.resolve('wrangler/package.json'));
+const {Miniflare}=wranglerRequire('miniflare'),{build}=wranglerRequire('esbuild');
+let checks=0;function ok(v,message){assert(v,message);checks++}
+const work=path.resolve('work/settings-tests');mkdirSync(work,{recursive:true});
+await build({stdin:{contents:"export * from './app/workspace-model';export * from './lib/workspace-validation'",resolveDir:process.cwd()},bundle:true,platform:'node',format:'esm',outfile:work+'/model.mjs',logLevel:'silent'});
+const {workspaceDefaults,workspaceSchema,newFormDefaults,formDefaults,secretChangesSchema}=await import(pathToFileURL(work+'/model.mjs'));
+ok(workspaceSchema.safeParse(workspaceDefaults).success,'All initial defaults pass validation');
+for(const bad of [{systemName:''},{primaryColor:'red'},{systemLogo:'javascript:alert(1)'},{defaultWebhook:'http://internal.local'},{defaultWhatsApp:'5520999999999'},{hot:10,warm:20},{pipelineStages:['Novo','Novo']},{defaultStage:'Missing'},{sessionHours:0},{timezone:'invalid/timezone'},{extraScript:'<script>'}])ok(!workspaceSchema.safeParse({...workspaceDefaults,...bad}).success,'Reject invalid setting '+JSON.stringify(bad));
+ok(!secretChangesSchema.safeParse({UNEXPECTED_SECRET:'x'}).success,'Secret keys are allowlisted');
+const modified={...workspaceDefaults,agencyName:'Empresa de teste',formColor:'#114477',defaultWhatsApp:'5588999999999',defaultPixel:'',formTitle:'Abertura configurada',formBenefits:[],showPoweredBy:false};
+const generated=newFormDefaults(initial(),modified);ok(generated.brand===modified.agencyName&&generated.color===modified.formColor&&generated.pixel===''&&generated.title===modified.formTitle,'New forms use saved defaults, including intentionally empty Pixel');
+ok(generated.privacy.includes('Empresa de teste')&&generated.message.includes('Empresa de teste')&&generated.benefits.length===0,'Agency placeholders and optional benefits apply');
+ok(!('pixel' in formDefaults(modified,['appearance']))&&!('privacy' in formDefaults(modified,['appearance'])),'Selective defaults preserve other groups');
+const root=path.resolve('dist/server'),files=readdirSync(root,{recursive:true}).filter(f=>/\.m?js$/.test(f)&&f!=='index.js');
+const mf=new Miniflare({modules:[{type:'ESModule',path:root+'/index.js'},...files.map(f=>({type:'ESModule',path:root+'/'+f}))],scriptPath:root+'/index.js',compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:{DB:'isolated-config-tests'},r2Buckets:['BUCKET'],bindings:{APP_OWNER_USER_ID:'test-owner',DATA_ENCRYPTION_KEY:Buffer.alloc(32,7).toString('base64'),WEBHOOK_SIGNING_SECRET:'INHERITED_TEST_ONLY',DEFAULT_META_FORM_ID:'default-form-test',DEFAULT_META_PIXEL_ID:'1234567890'}});
+const admin={'Content-Type':'application/json','oai-authenticated-user-id':'test-owner','oai-authenticated-user-email':'owner@example.test'};
+async function request(p,b,headers=admin){const r=await mf.dispatchFetch('http://app.local'+p,{method:b?'POST':'GET',headers,body:b?JSON.stringify(b):undefined});const text=await r.text();let data;try{data=JSON.parse(text)}catch{data=text}return {status:r.status,data,text,headers:r.headers}}
+try{
+ const db=await mf.getD1Database('DB');for(const file of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())for(const sql of readFileSync('drizzle/'+file,'utf8').split('--> statement-breakpoint').filter(s=>s.trim()))await db.prepare(sql).run();
+ ok((await request('/api/settings',undefined,{})).status===401,'Anonymous settings access denied');
+ const first=await request('/api/settings');ok(first.status===200&&first.data.canEdit&&first.data.settings.revision===0,'Owner can load defaults');ok(first.data.secrets.WEBHOOK_SIGNING_SECRET,'Existing runtime credentials are detected without returning them');ok(!first.text.includes('INHERITED_TEST_ONLY'),'Runtime credential value is never returned');
+ const denied=await request('/api/settings',{settings:{...first.data.settings,systemName:''}});ok(denied.status===400,'Invalid settings rejected by actual route');
+ const mediaForm=new FormData();mediaForm.append('file',new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5d8AAAAASUVORK5CYII=','base64')],'brand.png',{type:'image/png'}));
+ const encodedUpload=new Request('http://app.local/api/media',{method:'POST',headers:{'oai-authenticated-user-id':'test-owner','oai-authenticated-user-email':'owner@example.test'},body:mediaForm});const mediaResponse=await mf.dispatchFetch(encodedUpload.url,{method:'POST',headers:encodedUpload.headers,body:new Uint8Array(await encodedUpload.arrayBuffer())});const media=await mediaResponse.json();ok(mediaResponse.status===200&&media.url.startsWith('/api/media?id='),'Brand image uploads persist through R2');ok((await request(media.url,undefined,{})).status===200,'Brand images render publicly');
+ let settings={...first.data.settings,systemName:'ConfigSuite',systemBadge:'',agencyName:'Empresa de teste',systemLogo:media.url,agencyLogo:media.url,favicon:media.url,profileImage:media.url,bannerImage:media.url,homeTitle:'PAINEL_CONFIGURADO',formTitle:'FORMULARIO_CONFIGURADO',formColor:'#114477',defaultPixel:'',defaultWhatsApp:'5588999999999',pipelineStages:['Novo','Agendado','Fechado'],defaultStage:'Agendado',defaultAssignee:'Equipe comercial',defaultTags:['Campanha configurada'],timezone:'America/Manaus',leadPageSize:50,csvDelimiter:',',defaultWebhook:'https://example.com/private-hook'};
+ const secretMarker='TEST_ONLY_SECRET_NOT_REAL_7191';
+ const saved=await request('/api/settings',{settings,secrets:{META_CAPI_TOKEN:secretMarker,RESEND_API_KEY:secretMarker,NOTIFY_FROM:'Teste <leads@example.test>',TURNSTILE_SECRET:secretMarker}});ok(saved.status===200&&saved.data.settings.revision===1,'Settings and encrypted credentials save atomically: '+JSON.stringify(saved));settings=saved.data.settings;
+ const reload=await request('/api/settings');ok(reload.data.settings.systemName==='ConfigSuite'&&reload.data.settings.bannerImage===media.url,'Name and image persist after reload');ok(!reload.text.includes(secretMarker)&&!saved.text.includes(secretMarker),'Saved credentials are never returned to client');
+ const encrypted=await db.prepare("SELECT data FROM records WHERE kind='workspace_secrets'").first();ok(encrypted.data.startsWith('enc:v1:')&&!encrypted.data.includes(secretMarker),'Credentials are encrypted at rest');
+ const integrations=await request('/api/integrations');ok(integrations.data.capi&&integrations.data.email&&integrations.data.captcha,'Integration handlers use saved credentials');
+ const home=await request('/');ok(home.status===200&&home.text.includes('ConfigSuite')&&home.text.includes('PAINEL_CONFIGURADO'),'Saved branding appears in actual dashboard SSR');ok(!home.text.includes(secretMarker),'Dashboard SSR does not leak credentials');
+ const publicHome=await request('/',undefined,{});ok(publicHome.status===200&&publicHome.text.includes('ConfigSuite')&&!publicHome.text.includes('private-hook'),'Login screen uses branding without serializing private settings');
+ const managed=await request('/api/manage');ok(!managed.data.some(r=>r.kind==='workspace_secrets'||r.kind==='workspace_settings'),'General records API excludes private settings records');
+ const race=await Promise.all(['Versão A','Versão B'].map(systemName=>request('/api/settings',{settings:{...settings,systemName}})));ok(race.map(r=>r.status).sort().join(',')==='200,409','Concurrent editors cannot overwrite each other');settings=(await request('/api/settings')).data.settings;
+ ok((await request('/api/settings',{settings:workspaceDefaults})).status===409,'Stale settings revisions rejected');
+ ok((await request('/api/settings',{settings},{...admin,Origin:'https://different.example'})).status===403,'Cross-origin writes rejected');
+ let form=initial();form.id='default-form-test';form.pixel='';form.color='#2563eb';form.webhook='';form.brand='Marca original';
+ const created=await request('/api/manage',{id:form.id,kind:'form',data:form});ok(created.status===200,'Create form for defaults test');form=created.data.form;
+ form=(await request('/api/manage',{id:form.id,kind:'form',action:'publish',data:form})).data.form;
+ ok((await request('/api/manage')).data.find(r=>r.id===form.id).data.pixel==='','Explicitly cleared Pixel is not replaced by the legacy fallback');
+ const applied=await request('/api/settings',{action:'applyDefaults',revision:settings.revision,formIds:[form.id],groups:['appearance','texts']});ok(applied.status===200&&applied.data.saved===1,'Saved defaults apply to existing draft');
+ const draft=(await request('/api/manage')).data.find(r=>r.id===form.id).data;ok(draft.brand==='Empresa de teste'&&draft.color==='#114477'&&draft.title==='FORMULARIO_CONFIGURADO','Selected appearance and texts update');ok(draft.pixel===''&&draft.webhook==='','Unselected integrations stay unchanged');
+ const stillLive=await request('/f/'+form.id,undefined,{});ok(stillLive.status===200&&stillLive.text.includes('Marca original')&&!stillLive.text.includes('FORMULARIO_CONFIGURADO'),'Applying defaults preserves published snapshot');
+ const republished=await request('/api/manage',{id:form.id,kind:'form',action:'publish',data:draft});ok(republished.status===200,'Updated draft can be published');
+ const live=await request('/f/'+form.id,undefined,{});ok(live.text.includes('FORMULARIO_CONFIGURADO')&&live.text.includes('Empresa de teste'),'Published form displays configured texts and identity');
+ const answers={nome:'Teste isolado',instagram:'@teste_local',telefone:'(88) 99999-9999',segmento:'Clínica',faturamento:'Mais de R$100 mil',orcamento:'De R$3.000 a R$5.000 por mês',minimo:'Sim, está dentro do orçamento.',objetivo:'Gerar leads',experiencia:'Nunca investi',site:'Sim',inicio:'Imediatamente'};
+ const capture=await request('/api/respond',{formId:form.id,session:crypto.randomUUID(),event:'complete',answers,consent:true,analyticsConsent:false},{});ok(capture.status===200,'Configured form still accepts valid leads');
+ const lead=(await request('/api/manage')).data.find(r=>r.id===capture.data.leadId);ok(lead.data.stage==='Agendado'&&lead.data.assignedTo==='Equipe comercial'&&lead.data.tags.includes('Campanha configurada'),'New leads use configured pipeline, assignee and tags');
+ const stage=await request('/api/manage',{id:lead.id,kind:'leadUpdate',data:{...lead.data,stage:'Fechado'}});ok(stage.status===200&&(await request('/api/manage')).data.find(r=>r.id===lead.id).data.stage==='Fechado','Custom pipeline stages are accepted by server');
+ for(const [email,role] of [['staff@example.test','Atendente'],['manager@example.test','Gestor']])await request('/api/manage',{id:crypto.randomUUID(),kind:'member',data:{email,role}});
+ const staff={...admin,'oai-authenticated-user-id':'staff-local','oai-authenticated-user-email':'staff@example.test'},manager={...admin,'oai-authenticated-user-id':'manager-local','oai-authenticated-user-email':'manager@example.test'};
+ ok((await request('/api/settings',{settings},staff)).status===403&&(await request('/api/settings',{settings},manager)).status===403,'Only administrators can edit workspace settings');
+ const staffSettings=await request('/api/settings',undefined,staff);ok(!staffSettings.data.canEdit&&Object.keys(staffSettings.data.secrets).length===0&&staffSettings.data.settings.defaultWebhook==='','Staff cannot access credentials or private webhook defaults');
+ const backup=await request('/api/backup');ok(backup.data.records.some(r=>r.kind==='workspace_settings')&&backup.data.records.some(r=>r.kind==='workspace_secrets')&&!backup.text.includes(secretMarker),'Backup includes settings and encrypted credentials');
+ const removed=await request('/api/settings',{settings,secrets:{WEBHOOK_SIGNING_SECRET:null,META_CAPI_TOKEN:null}});ok(removed.status===200,'Credentials can be removed');settings=removed.data.settings;
+ const flags=(await request('/api/integrations')).data;ok(!flags.capi&&!flags.webhookSignature&&flags.email,'Removal overrides inherited secret and preserves unrelated credentials');
+ ok((await request('/api/manage',{id:'workspace-settings:test-owner',delete:true})).status===403,'Settings are protected against generic record deletion');
+ const audit=(await request('/api/manage')).data.filter(r=>r.kind==='audit');ok(audit.some(r=>r.data.action==='Configurações atualizadas')&&!JSON.stringify(audit).includes(secretMarker),'Configuration changes audited without credentials');
+ const nativeFetch=globalThis.fetch;globalThis.fetch=(url,options)=>String(url).startsWith('http://app.local')?mf.dispatchFetch(url,options):nativeFetch(url,options);process.env.FORMFLOW_TEST_URL='http://app.local';
+ try{await import('./api.test.mjs')}finally{globalThis.fetch=nativeFetch}
+ console.log(checks+' verificações de configurações passaram: validação, nomes, imagens, persistência, concorrência, publicação, captura, permissões, credenciais e backup.');
+}finally{await mf.dispose();rmSync(work,{recursive:true,force:true})}

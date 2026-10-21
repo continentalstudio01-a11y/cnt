@@ -1,0 +1,1 @@
+import {authClient} from '../../../../lib/supabase-auth';export async function GET(req:Request){const client=await authClient();await client.auth.signOut();return Response.redirect(new URL('/login',req.url),303)}
